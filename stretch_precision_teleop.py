@@ -29,6 +29,9 @@ parser=argparse.ArgumentParser(description=
 
 args=parser.parse_args()
 
+def slow_down(d, v, a):
+    scale = 0.25
+    return (scale * d, scale * v, scale * a)
 
 class CommandToLinearMotion():
     def __init__(self, command_dead_zone_value, move_duration_s, max_distance_m, accel_m):
@@ -120,7 +123,7 @@ head_tilt_target=0.0
 
 
 
-def manage_head(robot,controller_state):
+def manage_head(robot,controller_state, slow):
     global head_pan_target, head_tilt_target
     if not use_head_mapping:
         return
@@ -146,6 +149,8 @@ def manage_head(robot,controller_state):
         head_pan_target = max(head_pan_target - head_pan_slew_up, -head_pan_rad)
     if camera_pan_left:
         head_pan_target = min(head_pan_target + head_pan_slew_up, head_pan_rad)
+    if slow:
+        head_pan_target, head_pan_vel, head_pan_accel = slow_down(head_pan_target, head_pan_vel, head_pan_accel)
     robot.head.move_by('head_pan', head_pan_target, head_pan_vel, head_pan_accel)
 
     # Head tilt
@@ -165,6 +170,9 @@ def manage_head(robot,controller_state):
         head_tilt_target = max(head_tilt_target - head_tilt_slew_up, -head_tilt_rad)
     if camera_tilt_up:
         head_tilt_target = min(head_tilt_target + head_tilt_slew_up, head_tilt_rad)
+    if slow:
+        head_tilt_target, head_tilt_vel, head_tilt_accel = slow_down(head_tilt_target, head_tilt_vel, head_tilt_accel)
+
     robot.head.move_by('head_tilt', head_tilt_target, head_tilt_vel, head_tilt_accel)
 
 
@@ -196,7 +204,7 @@ fast_accel_rad = 0.8
 fast_command_to_rotary_motion = CommandToRotaryMotion(dead_zone, fast_move_s, fast_max_dist_rad, fast_accel_rad)
 ############################
 
-def manage_base(robot,controller_state):
+def manage_base(robot,controller_state, slow):
     forward_command = controller_state['left_stick_y']
     turn_command = controller_state['left_stick_x']
 
@@ -215,6 +223,8 @@ def manage_base(robot,controller_state):
                 d_m, v_m, a_m = command_to_linear_motion.get_dist_vel_accel(output_sign, forward_command)
             else:
                 d_m, v_m, a_m = fast_command_to_linear_motion.get_dist_vel_accel(output_sign, forward_command)
+            if slow:
+                d_m, v_m, a_m = slow_down(d_m, v_m, a_m)
             robot.base.translate_by(d_m, v_m, a_m)
     else:
         if abs(turn_command) > dead_zone:
@@ -223,23 +233,29 @@ def manage_base(robot,controller_state):
                 d_rad, v_rad, a_rad = command_to_rotary_motion.get_dist_vel_accel(output_sign, turn_command)
             else:
                 d_rad, v_rad, a_rad = fast_command_to_rotary_motion.get_dist_vel_accel(output_sign, turn_command)
+            if slow:
+                d_rad, v_rad, a_rad = slow_down(d_rad, v_rad, a_rad)
             robot.base.rotate_by(d_rad, v_rad, a_rad)
 
 
 # ######################### LIFT & ARM  ########################################
 
-def manage_lift_arm(robot,controller_state):
+def manage_lift_arm(robot,controller_state, slow):
     lift_command = controller_state['right_stick_y']
     arm_command = controller_state['right_stick_x']
 
     if abs(lift_command) > dead_zone:
         output_sign = math.copysign(1, lift_command)
         d_m, v_m, a_m = command_to_linear_motion.get_dist_vel_accel(output_sign, lift_command)
+        if slow:
+            d_m, v_m, a_m = slow_down(d_m, v_m, a_m)
         robot.lift.move_by(d_m, v_m, a_m)
 
     if abs(arm_command) > dead_zone:
         output_sign = math.copysign(1, arm_command)
         d_m, v_m, a_m = command_to_linear_motion.get_dist_vel_accel(output_sign, arm_command)
+        if slow:
+            d_m, v_m, a_m = slow_down(d_m, v_m, a_m)
         robot.arm.move_by(d_m, v_m, a_m)
 
 # ######################### END OF ARM  ########################################
@@ -247,7 +263,7 @@ wrist_yaw_target=0.0
 wrist_roll_target=0.0
 wrist_pitch_target=0.0
 
-def manage_end_of_arm(robot,controller_state):
+def manage_end_of_arm(robot,controller_state, slow):
     global wrist_yaw_target, wrist_roll_target, wrist_pitch_target
     wrist_yaw_left = controller_state['left_shoulder_button_pressed']
     wrist_yaw_right = controller_state['right_shoulder_button_pressed']
@@ -285,6 +301,9 @@ def manage_end_of_arm(robot,controller_state):
         wrist_yaw_target = min(wrist_yaw_target +wrist_yaw_slew_up, wrist_yaw_rotate_rad)
     if wrist_yaw_right:
         wrist_yaw_target = max(wrist_yaw_target - wrist_yaw_slew_up, -wrist_yaw_rotate_rad)
+    if slow:
+        wrist_yaw_target, wrist_yaw_vel, wrist_yaw_accel = slow_down(wrist_yaw_target, wrist_yaw_vel, wrist_yaw_accel)
+
     robot.end_of_arm.move_by('wrist_yaw', wrist_yaw_target, wrist_yaw_vel, wrist_yaw_accel)
 
 
@@ -315,7 +334,11 @@ def manage_end_of_arm(robot,controller_state):
         if wrist_pitch_down:
             wrist_pitch_target = min(wrist_pitch_target + wrist_pitch_slew_up, wrist_pitch_rotate_rad)
 
-        robot.end_of_arm.move_by('wrist_roll', wrist_roll_target, wrist_pitch_vel, wrist_pitch_accel)
+        if slow:
+            wrist_roll_target, wrist_roll_vel, wrist_roll_accel = slow_down(wrist_roll_target, wrist_roll_vel, wrist_roll_accel)
+            wrist_pitch_target, wrist_pitch_vel, wrist_pitch_accel = slow_down(wrist_pitch_target, wrist_pitch_vel, wrist_pitch_accel)
+
+        robot.end_of_arm.move_by('wrist_roll', wrist_roll_target, wrist_roll_vel, wrist_roll_accel)
         #print('WW',rad_to_deg(wrist_roll_target),robot.end_of_arm.motors['wrist_roll'].status['pos_ticks'])
         robot.end_of_arm.move_by('wrist_pitch', wrist_pitch_target, wrist_pitch_vel, wrist_pitch_accel)
 
@@ -324,6 +347,8 @@ def manage_end_of_arm(robot,controller_state):
         gripper_accel = robot.end_of_arm.motors['stretch_gripper'].params['motion']['max']['accel']
         gripper_vel = robot.end_of_arm.motors['stretch_gripper'].params['motion']['max']['vel']
 
+        if slow:
+            gripper_rotate_pct, gripper_vel, gripper_accel = slow_down(gripper_rotate_pct, gripper_vel, gripper_accel)
         if open_gripper:
             robot.end_of_arm.move_by('stretch_gripper', gripper_rotate_pct, gripper_vel, gripper_accel)
         elif close_gripper:
@@ -407,15 +432,24 @@ def main():
         robot.push_command()
         time.sleep(0.5)
 
+
+        slow_mode = False
+        slow_mode_switch_released = False
+        
         while True:
             controller_state = xbox_controller.get_state()
+            if not controller_state['left_button_pressed']:
+                slow_mode_switch_released = True
+            if slow_mode_switch_released and controller_state['left_button_pressed']:
+                slow_mode = not slow_mode
+                slow_mode_switch_released = False
             if not robot.is_calibrated():
                 manage_calibration(robot, controller_state)
             else:
-                manage_base(robot, controller_state)
-                manage_lift_arm(robot, controller_state)
-                manage_end_of_arm(robot, controller_state)
-                manage_head(robot, controller_state)
+                manage_base(robot, controller_state, slow_mode)
+                manage_lift_arm(robot, controller_state, slow_mode)
+                manage_end_of_arm(robot, controller_state, slow_mode)
+                manage_head(robot, controller_state, slow_mode)
                 manage_stow(robot, controller_state)
             manage_shutdown(robot, controller_state)
             robot.push_command()
